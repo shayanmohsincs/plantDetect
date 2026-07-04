@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, send_from_directory
-import google.generativeai as genai
+import google.genai as genai
 import base64
 import json
 import re
@@ -21,7 +21,7 @@ if not GEMINI_API_KEY:
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-2.0-flash"
 
 
 @app.route("/")

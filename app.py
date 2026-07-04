@@ -198,6 +198,8 @@ def detect():
                 "error": "Gemini API key not configured",
                 "details": "Set GEMINI_API_KEY environment variable"
             }), 500
+        
+        print(f"[DEBUG] API Key set: {GEMINI_API_KEY[:10]}...")  # Log first 10 chars
 
         # Initialize Gemini model
         model = genai.GenerativeModel(MODEL_NAME)

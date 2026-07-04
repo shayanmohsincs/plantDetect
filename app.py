@@ -181,6 +181,9 @@ def detect():
         image_file.seek(0)
         image_data = image_file.read()
         
+        if not image_data:
+            return jsonify({"error": "Image file is empty"}), 400
+        
         # Verify it's a valid image
         try:
             img = Image.open(BytesIO(image_data))
@@ -188,19 +191,26 @@ def detect():
         except Exception as e:
             return jsonify({"error": f"Invalid image file: {str(e)}"}), 400
 
+        # Check API key is set
+        if not GEMINI_API_KEY or GEMINI_API_KEY == "placeholder":
+            print("[ERROR] GEMINI_API_KEY not configured")
+            return jsonify({
+                "error": "Gemini API key not configured",
+                "details": "Set GEMINI_API_KEY environment variable"
+            }), 500
+
         # Initialize Gemini model
         model = genai.GenerativeModel(MODEL_NAME)
         
-        prompt = """You are an expert plant pathologist with 20+ years of experience. 
-Analyze this plant leaf image and provide a detailed plant health assessment:
+        prompt = """You are an expert plant pathologist. Analyze this plant leaf image:
 
-1. HEALTH STATUS: Is the plant healthy or diseased?
-2. DISEASE NAME: If diseased, provide the specific disease name
-3. CONFIDENCE: Your confidence level (80%, 90%, etc.)
-4. TREATMENTS: List specific fungicides, bactericides, or organic treatments
-5. PREVENTION: Practical prevention and care tips
+1. Is the plant healthy or diseased?
+2. If diseased, what is the disease name?
+3. Confidence level?
+4. What treatments work?
+5. How to prevent it?
 
-Format clearly with headers. Be specific and actionable."""
+Be specific and clear."""
 
         # Determine MIME type from filename
         filename = image_file.filename.lower()
@@ -211,27 +221,46 @@ Format clearly with headers. Be specific and actionable."""
         else:
             mime_type = "image/jpeg"
 
-        # Create image part with proper format
-        image_part = {
-            "mime_type": mime_type,
-            "data": base64.standard_b64encode(image_data).decode("utf-8")
-        }
+        # Encode image to base64
+        image_base64 = base64.standard_b64encode(image_data).decode("utf-8")
+        
+        print(f"[DEBUG] Image size: {len(image_data)} bytes, MIME: {mime_type}")
 
-        # Generate response from Gemini
-        response = model.generate_content([prompt, image_part])
-        response_text = response.text
+        # Call Gemini API with image
+        try:
+            response = model.generate_content([
+                prompt,
+                {
+                    "mime_type": mime_type,
+                    "data": image_base64
+                }
+            ])
+            
+            if not response or not response.text:
+                print("[ERROR] Gemini returned empty response")
+                return jsonify({
+                    "error": "Gemini API returned empty response"
+                }), 500
+            
+            response_text = response.text
+            print(f"[DEBUG] Gemini Response: {response_text[:300]}")
 
-        print(f"[DEBUG] Gemini Response: {response_text[:200]}")
+        except Exception as gemini_error:
+            print(f"[ERROR] Gemini API call failed: {type(gemini_error).__name__}: {str(gemini_error)}")
+            return jsonify({
+                "error": f"Gemini API error: {str(gemini_error)}"
+            }), 500
 
-        # Parse response and transform to expected JSON structure
+        # Parse response
         diagnosis = parse_gemini_response(response_text)
-
         return jsonify(diagnosis)
 
     except Exception as e:
-        print(f"[ERROR] Exception in detect: {type(e).__name__}: {str(e)}")
+        print(f"[ERROR] Unexpected error in detect: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
-            "error": "Failed to process image with Gemini API",
+            "error": "Failed to process image",
             "details": str(e)
         }), 500
 

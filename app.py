@@ -16,7 +16,8 @@ app = Flask(__name__, static_folder=".", static_url_path="")
 # Configure Gemini API from environment variable
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable not set. Please set it before running the app.")
+    print("WARNING: GEMINI_API_KEY not set. Set it in Railway dashboard or .env file")
+    GEMINI_API_KEY = "placeholder"  # Will fail at runtime with proper error
 
 genai.configure(api_key=GEMINI_API_KEY)
 

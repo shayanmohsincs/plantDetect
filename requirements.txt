@@ -1,3 +1,5 @@
 flask
-requests
+google-genai
 gunicorn
+python-dotenv
+pillow

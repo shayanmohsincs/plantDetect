@@ -29,13 +29,6 @@ def home():
     return send_from_directory(".", "index.html")
 
 
-def encode_image_to_base64(image_file):
-    """Convert uploaded image to base64 string"""
-    image_file.seek(0)
-    image_data = image_file.read()
-    return base64.standard_b64encode(image_data).decode("utf-8")
-
-
 def parse_gemini_response(response_text):
     """
     Parse Gemini's plant analysis and transform to expected JSON structure.
@@ -178,27 +171,24 @@ def detect():
     if "image" not in request.files:
         return jsonify({"error": "No image uploaded."}), 400
 
-    image = request.files["image"]
+    image_file = request.files["image"]
 
-    if image.filename == "":
+    if image_file.filename == "":
         return jsonify({"error": "No image selected."}), 400
 
     try:
-        # Validate and open image
+        # Read and validate image
+        image_file.seek(0)
+        image_data = image_file.read()
+        
+        # Verify it's a valid image
         try:
-            img = Image.open(image)
-            # Don't verify to allow seeking after reading
-            image.seek(0)
+            img = Image.open(BytesIO(image_data))
+            img.verify()
         except Exception as e:
             return jsonify({"error": f"Invalid image file: {str(e)}"}), 400
 
-        # Encode image to base64
-        image_base64 = encode_image_to_base64(image)
-        
-        # Determine image MIME type
-        image_mime_type = image.mimetype or "image/jpeg"
-
-        # Initialize Gemini model and call Vision API
+        # Initialize Gemini model
         model = genai.GenerativeModel(MODEL_NAME)
         
         prompt = """You are an expert plant pathologist with 20+ years of experience. 
@@ -212,32 +202,34 @@ Analyze this plant leaf image and provide a detailed plant health assessment:
 
 Format clearly with headers. Be specific and actionable."""
 
-        # Create image data in the format expected by genai
+        # Determine MIME type from filename
+        filename = image_file.filename.lower()
+        if filename.endswith('.png'):
+            mime_type = "image/png"
+        elif filename.endswith('.webp'):
+            mime_type = "image/webp"
+        else:
+            mime_type = "image/jpeg"
+
+        # Create image part with proper format
         image_part = {
-            "mime_type": image_mime_type,
-            "data": image_base64
+            "mime_type": mime_type,
+            "data": base64.standard_b64encode(image_data).decode("utf-8")
         }
 
         # Generate response from Gemini
         response = model.generate_content([prompt, image_part])
         response_text = response.text
 
-        print(f"Gemini Response: {response_text[:200]}...")  # Log first 200 chars
+        print(f"[DEBUG] Gemini Response: {response_text[:200]}")
 
         # Parse response and transform to expected JSON structure
         diagnosis = parse_gemini_response(response_text)
 
         return jsonify(diagnosis)
 
-    except ValueError as e:
-        if "API key" in str(e) or "API_KEY" in str(e):
-            return jsonify({
-                "error": "Gemini API key not configured",
-                "details": "Please set GEMINI_API_KEY environment variable"
-            }), 500
-        return jsonify({"error": str(e)}), 400
     except Exception as e:
-        print(f"Error in detect: {str(e)}")
+        print(f"[ERROR] Exception in detect: {type(e).__name__}: {str(e)}")
         return jsonify({
             "error": "Failed to process image with Gemini API",
             "details": str(e)

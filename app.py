@@ -19,7 +19,7 @@ if not GEMINI_API_KEY:
     print("WARNING: GEMINI_API_KEY not set. Set it in Railway dashboard or .env file")
     GEMINI_API_KEY = "placeholder"  # Will fail at runtime with proper error
 
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
 
 
 @app.route("/")

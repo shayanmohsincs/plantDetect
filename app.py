@@ -1,9 +1,9 @@
 from flask import Flask, request, jsonify, send_from_directory
-import google.generativeai as genai
 import base64
 import json
 import re
 import os
+import requests
 from io import BytesIO
 from PIL import Image
 from dotenv import load_dotenv
@@ -19,9 +19,7 @@ if not GEMINI_API_KEY:
     print("WARNING: GEMINI_API_KEY not set. Set it in Railway dashboard or .env file")
     GEMINI_API_KEY = "placeholder"  # Will fail at runtime with proper error
 
-genai.configure(api_key=GEMINI_API_KEY)
-
-MODEL_NAME = "gemini-1.5-pro-latest"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent"
 
 
 @app.route("/")
@@ -163,9 +161,8 @@ def extract_treatment_info(lines, disease_line_idx):
 @app.route("/detect", methods=["POST"])
 def detect():
     """
-    Detect plant disease using Gemini Vision API.
-    Expects image in multipart form data and returns response matching
-    Plant.id v2 health_assessment structure.
+    Detect plant disease using Gemini Vision API (REST endpoint).
+    Expects image in multipart form data.
     """
     # Check if an image was uploaded
     if "image" not in request.files:
@@ -198,23 +195,8 @@ def detect():
                 "error": "Gemini API key not configured",
                 "details": "Set GEMINI_API_KEY environment variable"
             }), 500
-        
-        print(f"[DEBUG] API Key set: {GEMINI_API_KEY[:10]}...")  # Log first 10 chars
 
-        # Initialize Gemini model
-        model = genai.GenerativeModel(MODEL_NAME)
-        
-        prompt = """You are an expert plant pathologist. Analyze this plant leaf image:
-
-1. Is the plant healthy or diseased?
-2. If diseased, what is the disease name?
-3. Confidence level?
-4. What treatments work?
-5. How to prevent it?
-
-Be specific and clear."""
-
-        # Determine MIME type from filename
+        # Determine MIME type
         filename = image_file.filename.lower()
         if filename.endswith('.png'):
             mime_type = "image/png"
@@ -228,37 +210,63 @@ Be specific and clear."""
         
         print(f"[DEBUG] Image size: {len(image_data)} bytes, MIME: {mime_type}")
 
-        # Call Gemini API with image
-        try:
-            response = model.generate_content([
-                prompt,
+        # Prepare request to Gemini API
+        url = f"{GEMINI_API_URL}?key={GEMINI_API_KEY}"
+        
+        headers = {"Content-Type": "application/json"}
+        
+        payload = {
+            "contents": [
                 {
-                    "mime_type": mime_type,
-                    "data": image_base64
+                    "parts": [
+                        {"text": "You are an expert plant pathologist. Analyze this plant leaf image and provide: 1) Is it healthy or diseased? 2) If diseased, what disease? 3) Confidence? 4) Treatment recommendations? 5) Prevention tips? Be specific and clear."},
+                        {
+                            "inlineData": {
+                                "mimeType": mime_type,
+                                "data": image_base64
+                            }
+                        }
+                    ]
                 }
-            ])
-            
-            if not response or not response.text:
-                print("[ERROR] Gemini returned empty response")
-                return jsonify({
-                    "error": "Gemini API returned empty response"
-                }), 500
-            
-            response_text = response.text
-            print(f"[DEBUG] Gemini Response: {response_text[:300]}")
+            ]
+        }
 
-        except Exception as gemini_error:
-            print(f"[ERROR] Gemini API call failed: {type(gemini_error).__name__}: {str(gemini_error)}")
+        print(f"[DEBUG] Calling Gemini API at {url[:50]}...")
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        print(f"[DEBUG] API Response Status: {response.status_code}")
+        
+        if response.status_code != 200:
+            error_msg = response.text
+            print(f"[ERROR] API Error: {error_msg}")
             return jsonify({
-                "error": f"Gemini API error: {str(gemini_error)}"
+                "error": f"Gemini API error: {response.status_code}",
+                "details": error_msg[:200]
             }), 500
 
-        # Parse response
+        response_data = response.json()
+        
+        # Extract text from response
+        try:
+            response_text = response_data["candidates"][0]["content"]["parts"][0]["text"]
+            print(f"[DEBUG] Response: {response_text[:300]}")
+        except (KeyError, IndexError) as e:
+            print(f"[ERROR] Failed to parse response: {str(e)}")
+            return jsonify({
+                "error": "Failed to parse API response",
+                "details": str(e)
+            }), 500
+
+        # Parse response and convert to expected format
         diagnosis = parse_gemini_response(response_text)
         return jsonify(diagnosis)
 
+    except requests.exceptions.Timeout:
+        print("[ERROR] API request timeout")
+        return jsonify({"error": "API request timeout"}), 504
     except Exception as e:
-        print(f"[ERROR] Unexpected error in detect: {type(e).__name__}: {str(e)}")
+        print(f"[ERROR] Unexpected error: {type(e).__name__}: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({
